@@ -4,7 +4,7 @@ A React Native mobile application showcasing a sports tournament calendar for Au
 
 ## Demo Video
 
-Watch the demo here: [Google Drive Demo](https://drive.google.com/file/d/18Z9yI8ttSUANorDdTtD_GfYul88ivgQ6/view?usp=drivesdk)
+Watch the demo here: [Google Drive Demo](https://drive.google.com/file/d/1A2waQ_QAIb2-tprrPPtDmxvSqHWmqcIv/view?usp=sharing)
 
 The video demonstrates:
 - Switching sports to update calendar highlights and tournament list
@@ -12,32 +12,17 @@ The video demonstrates:
 - Expanding/collapsing tournament cards to view match details
 - Handling "no data" states with contextual messages
 
-## Features
+# Features
 
-### Sports Filter Dropdown
-- Fetches sports list from API with "ALL" as default
-- Searchable, with updates to calendar highlights and tournament list on selection
-
-### Calendar View
-- Custom month view for August–October 2025
-- Highlights tournament start dates only
-- Tapping a date filters tournaments for that day
-
-### Tournament Cards
-- Displays logo (with fallback), name, sport, level (color-coded), and IST date range
-- Includes favorite button and expand/collapse for matches
-
-### Match Cards
-- Shows match details (teams, stage, IST date/time, venue) with sport-specific icons
-
-### Error Handling
-- User-friendly error messages with retry options for API failures
-
-### No Data State
-- Contextual messages based on sport/date filters (e.g., "No [sport] tournaments on selected date")
-
-### Animations
-- Smooth expand/collapse animations using LayoutAnimation and Animated
+- **Sports Filter Dropdown**: Fetches sports list from API with "ALL" as default; searchable with real-time updates to calendar and tournament list.
+- **Calendar View**: Custom month view for August–October 2025, highlighting only tournament start dates; date taps filter tournaments.
+- **Tournament Cards**: Displays logo (with API/Google Drive/local fallback), name, sport, level (color-coded), and IST date range; includes favorite button.
+- **Match Cards**: Shows match details (teams, stage, IST date/time, venue) with sport-specific icons (e.g., 🏸 for badminton).
+- **Error Handling**: User-friendly error messages with retry options for API failures.
+- **No Data State**: Contextual messages (e.g., "No [sport] tournaments on selected date").
+- **Animations**: Smooth expand/collapse with `LayoutAnimation` and `Animated`.
+- **Offline Support**: Caches sports and tournament data using AsyncStorage.
+- **Pull-to-Refresh**: Refreshes data with a pull gesture in the tournament list
 
 ## Project Structure
 
