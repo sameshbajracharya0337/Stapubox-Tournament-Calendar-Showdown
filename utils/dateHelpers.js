@@ -1,5 +1,3 @@
-// src/utils/dateHelpers.js
-
 /**
  * Convert UTC date to IST and format for display
  */
@@ -60,16 +58,46 @@ export const formatDateToIST = (dateString, format = 'date') => {
 };
 
 /**
- * ✅ Get YYYY-MM-DD string in IST (for calendar marking)
+ * ✅ FIXED: Get YYYY-MM-DD string from date (for calendar marking) - NO timezone conversion
  */
 export const getISTDateKey = (dateString) => {
   try {
+    if (!dateString) {
+      console.warn('getISTDateKey: Empty dateString provided');
+      return null;
+    }
+
+    // If it's already in YYYY-MM-DD format, return as is
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
+      console.log(`getISTDateKey: ${dateString} → ${dateString} (already in correct format)`);
+      return dateString;
+    }
+
+    // For date strings with time components, extract just the date part
+    if (dateString.includes('T')) {
+      const dateOnly = dateString.split('T')[0];
+      console.log(`getISTDateKey: ${dateString} → ${dateOnly} (extracted date part)`);
+      return dateOnly;
+    }
+
+    // Handle other formats by creating a date object
     const date = new Date(dateString);
-    const istOffset = 5.5 * 60 * 60 * 1000;
-    const istDate = new Date(date.getTime() + istOffset);
-    return istDate.toISOString().split('T')[0]; // YYYY-MM-DD
+    if (isNaN(date.getTime())) {
+      console.error('getISTDateKey: Invalid date:', dateString);
+      return null;
+    }
+
+    // Use UTC methods to avoid timezone interference
+    const year = date.getUTCFullYear();
+    const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(date.getUTCDate()).padStart(2, '0');
+    
+    const dateKey = `${year}-${month}-${day}`;
+    console.log(`getISTDateKey: ${dateString} → ${dateKey}`);
+    return dateKey;
+    
   } catch (error) {
-    console.error('Error converting to IST date key:', error);
+    console.error('Error in getISTDateKey:', error, 'for date:', dateString);
     return null;
   }
 };
@@ -95,32 +123,43 @@ export const formatDateRange = (startDate, endDate) => {
 /**
  * Get calendar month data for react-native-calendars
  */
-export const getCalendarMonths = () => {
-  const months = [];
-  const currentYear = 2025; // Fixed for Aug-Oct 2025
+export const getCalendarMonths = (tournaments = []) => {
+  const months = new Set();
+  const currentYear = 2025;
 
-  // August, September, October 2025
-  for (let month = 8; month <= 10; month++) {
-    months.push({
+  tournaments.forEach(sport => {
+    sport.tournaments.forEach(tournament => {
+      const startDate = new Date(tournament.start_date);
+      const month = startDate.getMonth() + 1; // 1-12
+      months.add(month);
+    });
+  });
+
+  return Array.from(months)
+    .sort((a, b) => a - b)
+    .map(month => ({
       month: month,
       year: currentYear,
       dateString: `${currentYear}-${month.toString().padStart(2, '0')}-01`
-    });
-  }
-
-  return months;
+    }));
 };
 
 /**
- * Check if a date is within the tournament period (Aug-Oct 2025)
+ * Check if a date is within the tournament period
  */
-export const isDateInRange = (dateString) => {
+export const isDateInRange = (dateString, tournaments = []) => {
   try {
     const date = new Date(dateString);
     const year = date.getFullYear();
     const month = date.getMonth() + 1; // getMonth() returns 0-11
+    const minMonth = Math.min(...tournaments.flatMap(sport =>
+      sport.tournaments.map(t => new Date(t.start_date).getMonth() + 1)
+    )) || 1;
+    const maxMonth = Math.max(...tournaments.flatMap(sport =>
+      sport.tournaments.map(t => new Date(t.start_date).getMonth() + 1)
+    )) || 12;
 
-    return year === 2025 && month >= 8 && month <= 10;
+    return year === 2025 && month >= minMonth && month <= maxMonth;
   } catch (error) {
     return false;
   }
@@ -153,13 +192,14 @@ export const formatCalendarDate = (dateString) => {
 };
 
 /**
- * Get today's date in YYYY-MM-DD format (IST)
+ * Get today's date in YYYY-MM-DD format (local date, no timezone conversion)
  */
 export const getTodayDateString = () => {
   const now = new Date();
-  const istOffset = 5.5 * 60 * 60 * 1000;
-  const istDate = new Date(now.getTime() + istOffset);
-  return istDate.toISOString().split('T')[0];
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 };
 
 /**

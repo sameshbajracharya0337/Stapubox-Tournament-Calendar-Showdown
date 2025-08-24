@@ -1,4 +1,3 @@
-// src/components/SportsDropdown.js
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
@@ -15,7 +14,7 @@ import {
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import APIService from '../services/api';
 
-const SportsDropdown = ({ onSportChange, selectedSport }) => {
+const SportsDropdown = ({ onSportChange, selectedSport, onDateClear }) => {
   const [sports, setSports] = useState([]);
   const [loading, setLoading] = useState(true);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
@@ -31,10 +30,11 @@ const SportsDropdown = ({ onSportChange, selectedSport }) => {
   // Update search query when selectedSport changes
   useEffect(() => {
     if (selectedSport) {
-      if (selectedSport.id === 'all') {
+      if (selectedSport.id === 'all' || selectedSport.sport_id === 'all') {
         setSearchQuery('');
       } else {
-        const displayName = selectedSport.sports_name || selectedSport.name || '';
+        // Handle multiple possible name fields from the new API structure
+        const displayName = selectedSport.sports_name || selectedSport.sport_name || selectedSport.name || '';
         // Capitalize the first letter of each word for consistency
         const capitalizedName = displayName.toLowerCase().replace(/\b\w/g, l => l.toUpperCase());
         setSearchQuery(capitalizedName);
@@ -90,7 +90,7 @@ const SportsDropdown = ({ onSportChange, selectedSport }) => {
         setSports(response.data);
         // Set default to "ALL" if no sport is selected
         if (!selectedSport && response.data.length > 0) {
-          const allOption = response.data.find(sport => sport.id === 'all');
+          const allOption = response.data.find(sport => sport.id === 'all' || sport.sport_id === 'all');
           if (allOption) {
             onSportChange(allOption);
             // Keep search query empty for "ALL" option
@@ -99,23 +99,39 @@ const SportsDropdown = ({ onSportChange, selectedSport }) => {
         }
       } else {
         setError(response.error || 'Failed to load sports');
+        // Even on error, we should have at least the "ALL" option from the fallback
+        if (response.data && response.data.length > 0) {
+          setSports(response.data);
+        }
       }
     } catch (err) {
       setError('Failed to load sports');
       console.error('Sports loading error:', err);
+      // Set fallback data
+      const fallbackData = [{
+        id: 'all',
+        sport_id: 'all',
+        sports_name: 'ALL',
+        sport_name: 'ALL',
+        name: 'ALL'
+      }];
+      setSports(fallbackData);
     } finally {
       setLoading(false);
     }
   };
 
   const getFilteredSports = () => {
-    if (!searchQuery.trim()) {
+    // If dropdown was opened via arrow click, show all sports
+    // If user is actively typing (input is focused), filter by search query
+    if (!isInputFocused || !searchQuery.trim()) {
       return sports;
     }
 
     const query = searchQuery.toLowerCase().trim();
     return sports.filter(sport => {
-      const sportName = sport.sports_name || sport.name || '';
+      // Handle multiple possible name fields
+      const sportName = sport.sports_name || sport.sport_name || sport.name || '';
       return sportName.toLowerCase().startsWith(query);
     });
   };
@@ -123,10 +139,14 @@ const SportsDropdown = ({ onSportChange, selectedSport }) => {
   const handleSportSelect = (sport) => {
     onSportChange(sport);
     // Only set search query for specific sports, not for "ALL"
-    if (sport.id === 'all') {
+    if (sport.id === 'all' || sport.sport_id === 'all') {
       setSearchQuery('');
+      // Clear the selected date when "ALL" is selected
+      if (onDateClear) {
+        onDateClear();
+      }
     } else {
-      const displayName = sport.sports_name || sport.name || '';
+      const displayName = sport.sports_name || sport.sport_name || sport.name || '';
       // Capitalize the first letter of each word for consistency
       const capitalizedName = displayName.toLowerCase().replace(/\b\w/g, l => l.toUpperCase());
       setSearchQuery(capitalizedName);
@@ -139,9 +159,13 @@ const SportsDropdown = ({ onSportChange, selectedSport }) => {
     
     // If the user clears the search input, revert to "ALL" selection
     if (text.trim() === '') {
-      const allOption = sports.find(sport => sport.id === 'all');
-      if (allOption && selectedSport?.id !== 'all') {
+      const allOption = sports.find(sport => sport.id === 'all' || sport.sport_id === 'all');
+      if (allOption && selectedSport?.id !== 'all' && selectedSport?.sport_id !== 'all') {
         onSportChange(allOption);
+        // Clear the selected date when reverting to "ALL"
+        if (onDateClear) {
+          onDateClear();
+        }
       }
     }
   };
@@ -178,8 +202,9 @@ const SportsDropdown = ({ onSportChange, selectedSport }) => {
   };
 
   const renderSportItem = ({ item }) => {
-    const isSelected = selectedSport?.id === item.id;
-    const displayName = item.sports_name || item.name;
+    const isSelected = selectedSport?.id === item.id || selectedSport?.sport_id === item.sport_id;
+    // Handle multiple possible name fields
+    const displayName = item.sports_name || item.sport_name || item.name;
     
     return (
       <TouchableOpacity
@@ -195,7 +220,7 @@ const SportsDropdown = ({ onSportChange, selectedSport }) => {
         ]}>
           {displayName}
         </Text>
-        {item.id === 'all' && (
+        {(item.id === 'all' || item.sport_id === 'all') && (
           <Text style={styles.allOptionSubtext}>Show all sports</Text>
         )}
       </TouchableOpacity>
@@ -211,7 +236,7 @@ const SportsDropdown = ({ onSportChange, selectedSport }) => {
     );
   }
 
-  if (error) {
+  if (error && sports.length === 0) {
     return (
       <TouchableOpacity style={styles.errorContainer} onPress={loadSports}>
         <Text style={styles.errorText}>⚠️ {error}</Text>
@@ -269,7 +294,7 @@ const SportsDropdown = ({ onSportChange, selectedSport }) => {
               ) : (
                 <FlatList
                   data={getFilteredSports()}
-                  keyExtractor={(item) => item.id.toString()}
+                  keyExtractor={(item) => (item.id || item.sport_id).toString()}
                   renderItem={renderSportItem}
                   showsVerticalScrollIndicator={false}
                   bounces={false}

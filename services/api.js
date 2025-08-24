@@ -1,80 +1,108 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import NetInfo from '@react-native-community/netinfo';
+import axios from 'axios';
 
+const BASE_URL_PROD = 'https://stapubox.com';
 const BASE_URL_DEMO = 'https://mockly.me/custom';
-const BASE_URL_PROD = 'https://stapubox';
 
 const API_ENDPOINTS = {
   SPORTS_LIST: '/sportslist',
-  TOURNAMENTS: '/tournament/demo'
+  TOURNAMENTS: '/tournament/demo',
 };
 
 const CACHE_KEYS = {
-  SPORTS_LIST: 'cached_sports_list',
-  TOURNAMENTS: 'cached_tournaments'
+  SPORTS_LIST: 'sports_list',
+  TOURNAMENTS: 'tournaments',
 };
 
-const CACHE_EXPIRY = 24 * 60 * 60 * 1000; // 1 day
-
 class APIService {
-  constructor(useDemoAPI = true) {
+  constructor(useDemoAPI = false) {
     this.baseURL = useDemoAPI ? BASE_URL_DEMO : BASE_URL_PROD;
     this.isDemoMode = useDemoAPI;
   }
 
+  async clearCache() {
+    try {
+      await AsyncStorage.removeItem(CACHE_KEYS.SPORTS_LIST);
+      await AsyncStorage.removeItem(CACHE_KEYS.TOURNAMENTS);
+      console.log('Cache cleared');
+    } catch (error) {
+      console.error('Error clearing cache:', error);
+    }
+  }
+
   async isOnline() {
-    const state = await NetInfo.fetch();
-    return state.isConnected;
+    try {
+      return true;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  async makeRequest(endpoint) {
+    try {
+      const response = await axios.get(`${this.baseURL}${endpoint}`);
+      return response.data;
+    } catch (error) {
+      throw new Error(`API request failed for ${endpoint}: ${error.message}`);
+    }
   }
 
   async getCachedData(key) {
     try {
-      const cached = await AsyncStorage.getItem(key);
-      if (cached) {
-        const { data, timestamp } = JSON.parse(cached);
-        if (Date.now() - timestamp < CACHE_EXPIRY) {
-          return data;
-        }
-      }
-      return null;
+      const data = await AsyncStorage.getItem(key);
+      return data ? JSON.parse(data) : null;
     } catch (error) {
-      console.error('Cache read error:', error);
+      console.error(`Error retrieving cache for ${key}:`, error);
       return null;
     }
   }
 
   async setCachedData(key, data) {
     try {
-      await AsyncStorage.setItem(key, JSON.stringify({ data, timestamp: Date.now() }));
+      await AsyncStorage.setItem(key, JSON.stringify(data));
     } catch (error) {
-      console.error('Cache write error:', error);
+      console.error(`Error setting cache for ${key}:`, error);
     }
   }
 
-  async makeRequest(endpoint, options = {}) {
+  formatToIST(dateTimeString) {
     try {
-      const url = `${this.baseURL}${endpoint}`;
-      console.log(`🔗 Making request to: ${url}`);
-      
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          ...options.headers,
-        },
-        ...options,
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+      const date = new Date(dateTimeString);
+      if (isNaN(date.getTime())) {
+        console.warn('Invalid date format:', dateTimeString);
+        return dateTimeString;
       }
-
-      const data = await response.json();
-      console.log(`📡 Response from ${endpoint}:`, data);
-      return data;
+      
+      const istOptions = {
+        timeZone: 'Asia/Kolkata',
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true,
+      };
+      
+      return date.toLocaleString('en-IN', istOptions);
     } catch (error) {
-      console.error('API Request failed:', error);
-      throw error;
+      console.error('Error formatting date to IST:', dateTimeString, error);
+      return dateTimeString;
+    }
+  }
+
+  getDateRange(startDate, endDate) {
+    try {
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+        console.warn('Invalid date range:', startDate, endDate);
+        return startDate;
+      }
+      const options = { month: 'short', day: 'numeric' };
+      return `${start.toLocaleDateString('en-IN', options)} - ${end.toLocaleDateString('en-IN', options)}`;
+    } catch (error) {
+      console.error('Error formatting date range:', startDate, endDate, error);
+      return startDate;
     }
   }
 
@@ -83,7 +111,6 @@ class APIService {
     let cachedData = await this.getCachedData(cacheKey);
 
     if (cachedData) {
-      console.log('Using cached sports list');
       return { success: true, data: cachedData };
     }
 
@@ -91,35 +118,72 @@ class APIService {
       if (!(await this.isOnline())) {
         throw new Error('Offline');
       }
+      
       const response = await this.makeRequest(API_ENDPOINTS.SPORTS_LIST);
       
       let sportsData = [];
-      
       if (response.status === 'success' && Array.isArray(response.data)) {
-        sportsData = response.data.map(sport => ({
+        // Add "ALL" option at the beginning
+        sportsData = [
+          {
+            id: 'all',
+            sport_id: 'all',
+            sports_name: 'ALL',
+            sport_name: 'ALL',
+            name: 'ALL'
+          }
+        ];
+
+        // Process the sports from API
+        const processedSports = response.data.filter(sport => {
+          if (!sport || !sport.sport_id || !sport.sport_name) {
+            console.warn('Invalid sport data filtered out:', sport);
+            return false;
+          }
+          return true;
+        }).map(sport => ({
           id: sport.sport_id,
           sport_id: sport.sport_id,
-          name: sport.sport_name,
           sports_name: sport.sport_name,
+          sport_name: sport.sport_name,
+          name: sport.sport_name,
+          sport_code: sport.sport_code
         }));
-      } else if (Array.isArray(response.data)) {
-        sportsData = response.data;
-      } else if (Array.isArray(response)) {
-        sportsData = response;
-      }
 
-      const sportsWithAll = [
-        { id: 'all', sport_id: 'all', name: 'ALL', sports_name: 'ALL' },
-        ...sportsData
-      ];
+        sportsData = [...sportsData, ...processedSports];
+      } else {
+        console.warn('Unexpected sports list response format:', response);
+        // Return just the "ALL" option if API fails
+        sportsData = [{
+          id: 'all',
+          sport_id: 'all',
+          sports_name: 'ALL',
+          sport_name: 'ALL',
+          name: 'ALL'
+        }];
+      }
       
-      await this.setCachedData(cacheKey, sportsWithAll);
-      return { success: true, data: sportsWithAll };
+      await this.setCachedData(cacheKey, sportsData);
+      return { success: true, data: sportsData };
     } catch (error) {
       if (cachedData) {
         return { success: true, data: cachedData, fromCache: true };
       }
-      return { success: false, error: error.message || 'Failed to fetch sports' };
+      
+      // Return "ALL" option as fallback
+      const fallbackData = [{
+        id: 'all',
+        sport_id: 'all',
+        sports_name: 'ALL',
+        sport_name: 'ALL',
+        name: 'ALL'
+      }];
+      
+      return { 
+        success: false, 
+        error: error.message || 'Failed to fetch sports list', 
+        data: fallbackData 
+      };
     }
   }
 
@@ -136,6 +200,7 @@ class APIService {
       if (!(await this.isOnline())) {
         throw new Error('Offline');
       }
+      
       const response = await this.makeRequest(API_ENDPOINTS.TOURNAMENTS);
       
       console.log('Raw API response (tournaments):', JSON.stringify(response, null, 2));
@@ -143,36 +208,61 @@ class APIService {
       let tournamentsData = [];
       
       if (response.status === 'success' && Array.isArray(response.data)) {
+        console.log(`Processing ${response.data.length} sports from API response`);
         tournamentsData = response.data
           .filter(sport => {
-            if (!sport || !sport.sports_id || !Array.isArray(sport.tournaments)) {
+            if (!sport || !sport.sport_id || !Array.isArray(sport.tournaments)) {
               console.warn('Invalid sport data filtered out:', sport);
               return false;
             }
+            console.log(`Sport ${sport.sport_name} has ${sport.tournaments.length} tournaments`);
             return true;
           })
-          .map(sport => ({
-            ...sport,
-            tournaments: sport.tournaments
-              .filter(tournament => {
-                if (
-                  !tournament ||
-                  !tournament.id ||
-                  !tournament.name ||
-                  !tournament.start_date ||
-                  typeof tournament !== 'object'
-                ) {
-                  console.warn('Invalid tournament data filtered out:', tournament);
-                  return false;
-                }
-                return true;
-              })
-              .map(tournament => ({
-                ...tournament,
-                matches: Array.isArray(tournament.matches) ? tournament.matches : []
-              }))
-          }))
-          .filter(sport => sport.tournaments.length > 0);
+          .map(sport => {
+            const mappedSport = {
+              sports_id: sport.sport_id,
+              sport_id: sport.sport_id,
+              sport_name: sport.sport_name,
+              tournaments: sport.tournaments
+                .filter(tournament => {
+                  if (
+                    !tournament ||
+                    !tournament.id ||
+                    !tournament.name ||
+                    !tournament.start_date ||
+                    typeof tournament !== 'object'
+                  ) {
+                    console.warn('Invalid tournament data filtered out:', tournament);
+                    return false;
+                  }
+                  return true;
+                })
+                .map(tournament => {
+                  // Debug tournament image URLs
+                  console.log(`🏆 Tournament: ${tournament.name}`);
+                  console.log(`🖼️ Image URL: ${tournament.tournament_img_url}`);
+                  
+                  return {
+                    ...tournament,
+                    matches: Array.isArray(tournament.matches) ? tournament.matches.map(match => ({
+                      ...match,
+                      start_time: match.start_date || match.start_time,
+                      team_a: match.team_a || 'Team A',
+                      team_b: match.team_b || 'Team B'
+                    })) : []
+                  };
+                })
+            };
+            console.log(`Mapped sport ${sport.sport_name} with ${mappedSport.tournaments.length} tournaments`);
+            return mappedSport;
+          })
+          .filter(sport => {
+            const keep = sport.tournaments.length > 0;
+            if (!keep) {
+              console.warn(`Sport ${sport.sport_name} filtered out: no valid tournaments`);
+            }
+            return keep;
+          });
       } else {
         console.warn('Unexpected tournaments response format:', response);
         tournamentsData = [];
@@ -195,72 +285,6 @@ class APIService {
     }
   }
 
-filterTournamentsBySport(tournaments, sportId) {
-  console.log(`Filtering tournaments by sport ID: ${sportId}`);
-  
-  if (!sportId || sportId === 'all') {
-    console.log('Returning all tournaments (no sport filter)');
-    return tournaments;
-  }
-  
-  const targetSportId = Number(sportId);
-  const filtered = tournaments.filter(sport => {
-    if (!sport || !sport.sports_id) {
-      console.warn('Invalid sport object in filter:', sport);
-      return false;
-    }
-    return sport.sports_id === targetSportId;
-  });
-  
-  console.log(`Filtered ${filtered.length} sport groups for sport ID ${targetSportId}`);
-  return filtered;
-}
-
-getTournamentsByDate(tournaments, targetDate) {
-  console.log(`Filtering tournaments by date: ${targetDate}`);
-  
-  if (!targetDate) {
-    console.log('No date filter applied');
-    return tournaments;
-  }
-  
-  const results = [];
-  const targetDateObj = new Date(targetDate);
-  
-  tournaments.forEach(sport => {
-    if (!sport || !Array.isArray(sport.tournaments)) {
-      console.warn('Invalid sport data in date filter:', sport);
-      return;
-    }
-    
-    const filteredTournaments = sport.tournaments.filter(tournament => {
-      if (!tournament || !tournament.start_date) {
-        console.warn('Invalid tournament in date filter:', tournament);
-        return false;
-      }
-      try {
-        const tournamentDate = new Date(tournament.start_date);
-        const tournamentDateString = tournamentDate.toISOString().split('T')[0];
-        const targetDateString = targetDateObj.toISOString().split('T')[0];
-        return tournamentDateString === targetDateString;
-      } catch (error) {
-        console.error('Error parsing tournament date:', tournament.start_date, error);
-        return false;
-      }
-    });
-    
-    if (filteredTournaments.length > 0) {
-      results.push({
-        ...sport,
-        tournaments: filteredTournaments
-      });
-    }
-  });
-  
-  console.log(`Found ${results.length} sport groups with tournaments on ${targetDate}`);
-  return results;
-}
-  // Filter tournaments by sport
   filterTournamentsBySport(tournaments, sportId) {
     console.log(`🔍 Filtering tournaments by sport: ${sportId}`);
     
@@ -268,140 +292,64 @@ getTournamentsByDate(tournaments, targetDate) {
       return tournaments;
     }
     
-    // Convert sportId to number for comparison since API uses numeric IDs
-    const targetSportId = Number(sportId);
+    const targetSportId = String(sportId);
     
     const filtered = tournaments.filter(sport => {
-      // Compare numeric sport IDs
-      return sport.sports_id === targetSportId;
+      return String(sport.sports_id) === targetSportId || String(sport.sport_id) === targetSportId;
     });
     
     console.log(`📊 Filtered result: ${filtered.length} sport groups found for sport ID ${targetSportId}`);
     return filtered;
   }
 
-  // Get tournaments starting on a specific date
-  getTournamentsByDate(tournaments, targetDate) {
-    console.log(`📅 Getting tournaments for date: ${targetDate}`);
+  getTournamentsByDate(tournaments, selectedDate) {
+    console.log(`🔍 Filtering tournaments by date: ${selectedDate}`);
     
-    const results = [];
-    const targetDateObj = new Date(targetDate);
+    const parsedSelectedDate = new Date(selectedDate);
     
-    tournaments.forEach(sport => {
-      const filteredTournaments = sport.tournaments?.filter(tournament => {
+    if (isNaN(parsedSelectedDate.getTime())) {
+      console.warn('Invalid selected date:', selectedDate);
+      return tournaments;
+    }
+    
+    const selectedYear = parsedSelectedDate.getFullYear();
+    const selectedMonth = parsedSelectedDate.getMonth();
+    const selectedDay = parsedSelectedDate.getDate();
+    
+    const filtered = tournaments.map(sport => ({
+      ...sport,
+      tournaments: sport.tournaments.filter(tournament => {
         try {
-          // Parse the tournament start date
-          const tournamentDate = new Date(tournament.start_date);
+          const startDate = new Date(tournament.start_date);
+          const endDate = new Date(tournament.end_date || tournament.start_date);
           
-          // Compare dates (ignoring time)
-          const tournamentDateString = tournamentDate.toISOString().split('T')[0];
-          const targetDateString = targetDateObj.toISOString().split('T')[0];
+          if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+            console.warn('Invalid tournament dates:', tournament.start_date, tournament.end_date);
+            return false;
+          }
           
-          return tournamentDateString === targetDateString;
+          const startYear = startDate.getFullYear();
+          const startMonth = startDate.getMonth();
+          const startDay = startDate.getDate();
+          const endYear = endDate.getFullYear();
+          const endMonth = endDate.getMonth();
+          const endDay = endDate.getDate();
+          
+          const isWithinRange =
+            (startYear < selectedYear || (startYear === selectedYear && startMonth < selectedMonth) || (startYear === selectedYear && startMonth === selectedMonth && startDay <= selectedDay)) &&
+            (endYear > selectedYear || (endYear === selectedYear && endMonth > selectedMonth) || (endYear === selectedYear && endMonth === selectedMonth && endDay >= selectedDay));
+          
+          return isWithinRange;
         } catch (error) {
-          console.error('Error parsing tournament date:', tournament.start_date, error);
+          console.warn('Error processing tournament dates:', tournament, error);
           return false;
         }
-      });
-      
-      if (filteredTournaments && filteredTournaments.length > 0) {
-        results.push({
-          ...sport,
-          tournaments: filteredTournaments
-        });
-      }
-    });
+      })
+    })).filter(sport => sport.tournaments.length > 0);
     
-    console.log(`🏆 Found ${results.length} sport groups with tournaments on ${targetDate}`);
-    return results;
-  }
-
-  // Get all tournament start dates for calendar highlighting
-  getTournamentStartDates(tournaments) {
-    console.log('📅 Extracting tournament start dates for calendar...');
-    const dates = {};
-
-    tournaments.forEach(sport => {
-      if (!sport || !Array.isArray(sport.tournaments)) {
-        console.warn('Invalid sport data in getTournamentStartDates:', sport);
-        return;
-      }
-
-      sport.tournaments.forEach(tournament => {
-        if (!tournament || !tournament.start_date) {
-          console.warn('Invalid tournament in getTournamentStartDates:', tournament);
-          return;
-        }
-        try {
-          const date = new Date(tournament.start_date);
-          if (isNaN(date.getTime())) {
-            console.warn('Invalid date format for tournament:', tournament.start_date);
-            return;
-          }
-          const dateString = date.toISOString().split('T')[0]; // e.g., "2025-08-20"
-          dates[dateString] = {
-            marked: true,
-            dotColor: '#E17827',
-            selected: true,
-            selectedColor: '#FFE4E1',
-          };
-        } catch (error) {
-          console.error('Error parsing date in getTournamentStartDates:', tournament.start_date, error);
-        }
-      });
-    });
-
-    console.log('📊 Extracted', Object.keys(dates).length, 'tournament dates:', Object.keys(dates));
-    return dates;
-  }
-
-  // Convert tournament datetime to IST display format
-  formatToIST(dateTimeString) {
-    try {
-      const date = new Date(dateTimeString);
-      
-      // Convert to IST (UTC+5:30)
-      const istOptions = {
-        timeZone: 'Asia/Kolkata',
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: true
-      };
-      
-      return date.toLocaleString('en-IN', istOptions);
-    } catch (error) {
-      console.error('Error formatting date to IST:', dateTimeString, error);
-      return dateTimeString; // Return original if parsing fails
-    }
-  }
-
-  // Get date range string for tournaments
-  getDateRange(startDate, endDate = null) {
-    try {
-      const start = new Date(startDate);
-      const startIST = this.formatToIST(startDate);
-      
-      if (!endDate) {
-        return startIST;
-      }
-      
-      const end = new Date(endDate);
-      const endIST = this.formatToIST(endDate);
-      
-      // If same date, show only start time
-      if (start.toDateString() === end.toDateString()) {
-        return startIST;
-      }
-      
-      return `${startIST} - ${endIST}`;
-    } catch (error) {
-      console.error('Error creating date range:', startDate, endDate, error);
-      return startDate;
-    }
+    console.log(`📊 Filtered result: ${filtered.length} sport groups found for date ${selectedDate}`);
+    return filtered;
   }
 }
 
-export default new APIService(true);
+export default new APIService(false);

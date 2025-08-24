@@ -11,6 +11,7 @@
     "@expo/vector-icons": "~14.0.4",
     "@react-native-async-storage/async-storage": "1.23.1",
     "@react-native-community/netinfo": "11.4.1",
+    "axios": "^1.11.0",
     "expo": "~52.0.47",
     "expo-status-bar": "~2.0.1",
     "react": "18.3.1",

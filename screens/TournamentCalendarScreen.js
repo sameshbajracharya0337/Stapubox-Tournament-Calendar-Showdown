@@ -1,391 +1,372 @@
-// src/screens/TournamentCalendarScreen.js
-import React, { useState, useEffect, useMemo } from 'react';
-import {
-  View,
-  Text,
-  ScrollView,
-  StyleSheet,
-  RefreshControl,
-  ActivityIndicator,
-  StatusBar,
-  SafeAreaView,
-} from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, FlatList, StyleSheet, ActivityIndicator, RefreshControl } from 'react-native';
 import SportsDropdown from '../components/SportsDropdown';
 import CalendarView from '../components/CalendarView';
 import TournamentCard from '../components/TournamentCard';
 import APIService from '../services/api';
+import { getISTDateKey, getTodayDateString, getCalendarMonths, isDateInRange } from '../utils/dateHelpers';
 
 const TournamentCalendarScreen = () => {
-  // State Management
   const [tournaments, setTournaments] = useState([]);
   const [filteredTournaments, setFilteredTournaments] = useState([]);
   const [selectedSport, setSelectedSport] = useState(null);
-  const [selectedDate, setSelectedDate] = useState(null);
+  const [selectedDate, setSelectedDate] = useState(null); // Changed to null initially
+  const [currentMonth, setCurrentMonth] = useState(8); // August 2025
+  const [markedDates, setMarkedDates] = useState({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
 
-  // Load initial data
   useEffect(() => {
-    loadTournaments();
+    APIService.clearCache().then(() => loadTournaments());
   }, []);
 
-  // Filter tournaments when sport or date selection changes
-  useEffect(() => {
-    applyFilters();
-  }, [selectedSport, selectedDate, tournaments]);
-
-  const loadTournaments = async () => {
+  const loadTournaments = async (isRefresh = false) => {
     try {
-      setLoading(true);
+      if (!isRefresh) {
+        setLoading(true);
+      }
       setError(null);
       
       const response = await APIService.fetchTournaments();
-      
       if (response.success) {
         setTournaments(response.data);
-        console.log('📱 Loaded tournaments:', response.data);
+        setFilteredTournaments(response.data);
+        
+        // Initial marked dates will be calculated when selectedSport is set
       } else {
         setError(response.error || 'Failed to load tournaments');
       }
     } catch (err) {
-      setError('Network error. Please try again.');
-      console.error('Tournament loading error:', err);
+      console.error('Error loading tournaments:', err);
+      setError('Failed to load tournaments');
     } finally {
-      setLoading(false);
+      if (!isRefresh) {
+        setLoading(false);
+      }
     }
   };
 
+  // Helper function to filter tournaments by month
+  const filterTournamentsByMonth = (tournamentsData, month, year) => {
+    console.log(`Filtering tournaments for month: ${month}, year: ${year}`);
+    
+    return tournamentsData.map(sportData => {
+      const filteredTournaments = sportData.tournaments.filter(tournament => {
+        const tournamentDate = new Date(tournament.start_date);
+        const tournamentMonth = tournamentDate.getMonth() + 1; // getMonth() returns 0-11
+        const tournamentYear = tournamentDate.getFullYear();
+        
+        const belongsToMonth = tournamentMonth === month && tournamentYear === year;
+        
+        if (belongsToMonth) {
+          console.log(`Tournament "${tournament.name}" belongs to month ${month}: ${tournament.start_date}`);
+        }
+        
+        return belongsToMonth;
+      });
+      
+      return {
+        ...sportData,
+        tournaments: filteredTournaments
+      };
+    }).filter(sportData => sportData.tournaments.length > 0); // Only return sports that have tournaments in this month
+  };
+  
+  const calculateMarkedDates = (tournamentsData, sportFilter) => {
+    console.log('=== Calculating Marked Dates ===');
+    console.log('Sport filter:', sportFilter);
+    console.log('Tournaments data:', tournamentsData.length, 'sports');
+
+    const marked = {};
+    const processedDates = new Set(); // Prevent duplicates
+    
+    // Determine which tournaments to process based on sport filter
+    let tournamentsToProcess = tournamentsData;
+    
+    if (sportFilter && (sportFilter.id !== 'all' && sportFilter.sport_id !== 'all')) {
+      console.log('Filtering marked dates for sport:', sportFilter.sports_name || sportFilter.sport_name);
+      tournamentsToProcess = APIService.filterTournamentsBySport(tournamentsData, sportFilter.id || sportFilter.sport_id);
+    } else {
+      console.log('Showing marked dates for ALL sports');
+    }
+    
+    tournamentsToProcess.forEach(sport => {
+      console.log(`Processing sport for marking: ${sport.sport_name}, tournaments: ${sport.tournaments.length}`);
+      
+      sport.tournaments.forEach(tournament => {
+        const startDateKey = getISTDateKey(tournament.start_date);
+        
+        if (startDateKey && !processedDates.has(startDateKey)) {
+          console.log(`✅ Marking date: ${startDateKey} for tournament: ${tournament.name} (${sport.sport_name})`);
+          marked[startDateKey] = { marked: true };
+          processedDates.add(startDateKey);
+        } else if (!startDateKey) {
+          console.log(`❌ Invalid date for tournament: ${tournament.name} - ${tournament.start_date}`);
+        } else {
+          console.log(`⏭️  Date already marked: ${startDateKey} for ${tournament.name}`);
+        }
+      });
+    });
+    
+    console.log('📅 Final markedDates object:', marked);
+    console.log('📊 Total unique dates marked:', Object.keys(marked).length);
+    console.log('================================');
+    
+    return marked;
+  };
+
+  // Update marked dates when tournaments or selected sport changes
+  useEffect(() => {
+    if (tournaments.length > 0) {
+      const newMarkedDates = calculateMarkedDates(tournaments, selectedSport);
+      setMarkedDates(newMarkedDates);
+    }
+  }, [tournaments, selectedSport]);
+
   const applyFilters = () => {
+    console.log('Applying filters with:', { selectedSport, selectedDate, currentMonth });
     let filtered = tournaments;
 
-    // First filter by sport if not "ALL"
-    if (selectedSport && selectedSport.id !== 'all') {
-      filtered = APIService.filterTournamentsBySport(tournaments, selectedSport.id);
+    // Filter by sport first
+    if (selectedSport && (selectedSport.id !== 'all' && selectedSport.sport_id !== 'all')) {
+      console.log(`Filtering by sport ID: ${selectedSport.id || selectedSport.sport_id}`);
+      filtered = APIService.filterTournamentsBySport(tournaments, selectedSport.id || selectedSport.sport_id);
+      console.log(`After sport filter: ${filtered.length} sports`);
     }
 
-    // Then filter by date if selected
+    // Filter by specific date if selected, otherwise filter by current month
     if (selectedDate) {
+      console.log(`Filtering by specific date: ${selectedDate}`);
       filtered = APIService.getTournamentsByDate(filtered, selectedDate);
+      console.log(`After date filter: ${filtered.length} sports`);
+    } else {
+      // Filter by current month when no specific date is selected
+      console.log(`Filtering by current month: ${currentMonth}`);
+      filtered = filterTournamentsByMonth(filtered, currentMonth, 2025);
+      console.log(`After month filter: ${filtered.length} sports`);
     }
 
-    console.log('🔄 Applied filters:', { 
-      sport: selectedSport?.sports_name || selectedSport?.name, 
+    console.log('Applied filters:', { 
+      sport: selectedSport?.sports_name || selectedSport?.sport_name || selectedSport?.name, 
       date: selectedDate,
+      month: currentMonth,
       resultCount: filtered.length 
     });
 
     setFilteredTournaments(filtered);
   };
 
+  useEffect(() => {
+    applyFilters();
+  }, [selectedSport, selectedDate, currentMonth, tournaments]);
+
   const handleSportChange = (sport) => {
-    console.log('🏃 Sport changed:', sport);
+    console.log('Sport changed to:', sport);
     setSelectedSport(sport);
-    // Don't reset date selection when sport changes - let user keep date filter
   };
 
-  const handleDateSelect = (dateString) => {
-    const newDate = selectedDate === dateString ? null : dateString;
-    console.log('📅 Date selected:', newDate);
-    setSelectedDate(newDate);
+  const handleDateSelect = (date) => {
+    console.log('Selected date:', date);
+    setSelectedDate(date);
   };
 
-  const handleRefresh = async () => {
+  // New function to clear the selected date
+  const handleDateClear = () => {
+    console.log('Clearing selected date');
+    setSelectedDate(null);
+  };
+
+  const handleMonthChange = (month) => {
+    console.log('Month changed to:', month);
+    setCurrentMonth(month);
+  };
+
+  // Handle pull-to-refresh
+  const onRefresh = async () => {
+    console.log('Pull-to-refresh triggered');
     setRefreshing(true);
-    await loadTournaments();
-    setRefreshing(false);
-  };
-
-  // Get current sport display name
-  const getCurrentSportName = () => {
-    if (!selectedSport || selectedSport.id === 'all') return 'All Sports';
-    return selectedSport.sports_name || selectedSport.name;
-  };
-
-  // Get sport icon based on sport name or ID
-  const getSportIcon = (sportName, sportId) => {
-    const sport = sportName?.toLowerCase() || getSportNameById(sportId)?.toLowerCase();
     
-    const sportIcons = {
-      'football': '⚽',
-      'american football': '🏈',
-      'archery': '🏹',
-      'badminton': '🏸',
-      'chess': '♟️',
-      'cricket': '🏏',
-      'hockey': '🏒',
-      'kabaddi': '🤼‍♂️',
-      'pickleball': '🏓',
-    };
-
-    return sportIcons[sport] || '🏃';
-  };
-
-  // Helper function to get sport name by ID
-  const getSportNameById = (sportId) => {
-    const sportMap = {
-      7011305: 'american football',
-      7011803: 'archery',
-      7020104: 'badminton',
-      7030819: 'chess',
-      7031809: 'cricket',
-      7061509: 'football',
-      7081503: 'hockey',
-      7110101: 'kabaddi',
-      7161103: 'pickleball',
-    };
-    
-    return sportMap[sportId];
-  };
-
-  // Memoized calendar marked dates
-  const markedDates = useMemo(() => {
-    const tournamentsToMark = selectedSport?.id === 'all' || !selectedSport
-      ? tournaments
-      : APIService.filterTournamentsBySport(tournaments, selectedSport.id);
-    
-    const dates = APIService.getTournamentStartDates(tournamentsToMark);
-    console.log('📅 Marked dates for calendar:', Object.keys(dates).length, 'dates');
-    return dates;
-  }, [tournaments, selectedSport]);
-
-  // Render tournament cards
-  const renderTournamentCards = () => {
-    if (loading) {
-      return (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#FF6B35" />
-          <Text style={styles.loadingText}>Loading tournaments...</Text>
-        </View>
-      );
-    }
-
-    if (error) {
-      return (
-        <View style={styles.errorContainer}>
-          <Text style={styles.errorText}>⚠️ {error}</Text>
-          <Text style={styles.retryText}>Pull down to refresh</Text>
-        </View>
-      );
-    }
-
-    if (!filteredTournaments || filteredTournaments.length === 0) {
-      const isDateFiltered = !!selectedDate;
-      const isSportFiltered = selectedSport && selectedSport.id !== 'all';
+    try {
+      // Clear cache and reload tournaments
+      await APIService.clearCache();
+      await loadTournaments(true);
       
-      let noDataMessage = 'No tournaments found';
-      let noDataSubtext = 'Pull down to refresh';
-      
-      if (isDateFiltered && isSportFiltered) {
-        noDataMessage = `No ${getCurrentSportName().toLowerCase()} tournaments on selected date`;
-        noDataSubtext = 'Try selecting a different date or sport';
-      } else if (isDateFiltered) {
-        noDataMessage = 'No tournaments found for selected date';
-        noDataSubtext = 'Try selecting a different date';
-      } else if (isSportFiltered) {
-        noDataMessage = `No ${getCurrentSportName().toLowerCase()} tournaments found`;
-        noDataSubtext = 'Try selecting a different sport';
+      console.log('Refresh completed successfully');
+    } catch (error) {
+      console.error('Refresh failed:', error);
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  // Flatten the tournament data for FlatList and sort by date
+  const getFlattenedTournaments = () => {
+    const flattened = [];
+    filteredTournaments.forEach((sportData, sportIndex) => {
+      if (sportData.tournaments && sportData.tournaments.length > 0) {
+        sportData.tournaments.forEach((tournament, tournamentIndex) => {
+          flattened.push({
+            id: `${tournament.id}-${sportIndex}-${tournamentIndex}`,
+            tournament,
+            sportName: sportData.sport_name || sportData.sports_name,
+            sportsId: sportData.sports_id || sportData.sport_id,
+          });
+        });
       }
-      
-      return (
-        <View style={styles.noDataContainer}>
-          <Text style={styles.noDataText}>{noDataMessage}</Text>
-          <Text style={styles.noDataSubtext}>{noDataSubtext}</Text>
-        </View>
-      );
-    }
-
-    return filteredTournaments.map((sportData, index) => (
-      <View key={`${sportData.sports_id}-${index}`}>
-        {sportData.tournaments?.map((tournament, tournamentIndex) => (
-          <TournamentCard
-            key={`${tournament.id}-${tournamentIndex}`}
-            tournament={tournament}
-            sportName={sportData.sport_name}
-          />
-        ))}
-      </View>
-    ));
+    });
+    
+    // Sort by tournament start date
+    flattened.sort((a, b) => {
+      const dateA = new Date(a.tournament.start_date);
+      const dateB = new Date(b.tournament.start_date);
+      return dateA - dateB; // Ascending order (earliest first)
+    });
+    
+    console.log('Flattened and sorted tournaments:', flattened.map(item => ({
+      name: item.tournament.name,
+      sport: item.sportName,
+      date: item.tournament.start_date
+    })));
+    
+    return flattened;
   };
+
+  const renderHeader = () => (
+    <CalendarView
+      markedDates={markedDates}
+      onDateSelect={handleDateSelect}
+      selectedDate={selectedDate}
+      tournaments={tournaments}
+      onMonthChange={handleMonthChange}
+      currentMonth={currentMonth}
+    />
+  );
+
+  const renderTournamentItem = ({ item }) => (
+    <TournamentCard
+      tournament={item.tournament}
+      sportName={item.sportName}
+      sportsId={item.sportsId}
+    />
+  );
+
+  const renderEmptyComponent = () => (
+    <View style={styles.noDataContainer}>
+      <Text style={styles.noDataText}>No tournaments found</Text>
+    </View>
+  );
+
+  const renderFooter = () => (
+    <View style={styles.footerSpacer} />
+  );
+
+  if (loading) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.headerTitle}>Tournament Calendar</Text>
+        <SportsDropdown 
+          onSportChange={handleSportChange} 
+          selectedSport={selectedSport} 
+          onDateClear={handleDateClear}
+        />
+        <ActivityIndicator size="large" color="#007AFF" style={styles.loading} />
+      </View>
+    );
+  }
+
+  if (error) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.headerTitle}>Tournament Calendar</Text>
+        <SportsDropdown 
+          onSportChange={handleSportChange} 
+          selectedSport={selectedSport} 
+          onDateClear={handleDateClear}
+        />
+        <View style={styles.noDataContainer}>
+          <Text style={styles.errorText}>{error}</Text>
+        </View>
+      </View>
+    );
+  }
+
+  const flattenedData = getFlattenedTournaments();
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
-      
-      {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Tournament Calendar</Text>
-        <Text style={styles.headerSubtitle}>Aug - Oct 2025</Text>
-      </View>
-
-      {/* Sports Filter */}
-      <SportsDropdown
-        selectedSport={selectedSport}
-        onSportChange={handleSportChange}
+    <View style={styles.container}>
+      <Text style={styles.headerTitle}>Tournament Calendar</Text>
+      <SportsDropdown 
+        onSportChange={handleSportChange} 
+        selectedSport={selectedSport} 
+        onDateClear={handleDateClear}
       />
-
-      <ScrollView
-        style={styles.scrollView}
+      <FlatList
+        data={flattenedData}
+        renderItem={renderTournamentItem}
+        keyExtractor={(item) => item.id}
+        ListHeaderComponent={renderHeader}
+        ListEmptyComponent={renderEmptyComponent}
+        ListFooterComponent={renderFooter}
+        contentContainerStyle={styles.flatListContent}
         showsVerticalScrollIndicator={false}
+        removeClippedSubviews={false} // Better for complex layouts
+        initialNumToRender={10}
+        maxToRenderPerBatch={10}
+        windowSize={10}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
-            onRefresh={handleRefresh}
-            colors={['#FF6B35']}
-            tintColor="#FF6B35"
+            onRefresh={onRefresh}
+            tintColor="#E17827"
+            colors={['#E17827']}
+            progressBackgroundColor="#ffffff"
           />
         }
-      >
-        {/* Calendar */}
-        <CalendarView
-          markedDates={markedDates}
-          onDateSelect={handleDateSelect}
-          selectedDate={selectedDate}
-        />
-
-        {/* Active Filters Indicator */}
-        {(selectedDate || (selectedSport && selectedSport.id !== 'all')) && (
-          <View style={styles.filtersContainer}>
-            {selectedDate && (
-              <View style={styles.filterChip}>
-                <Text style={styles.filterChipText}>
-                  📅 {new Date(selectedDate).toLocaleDateString('en-IN', {
-                    day: '2-digit',
-                    month: 'short',
-                    year: 'numeric'
-                  })}
-                </Text>
-              </View>
-            )}
-            {selectedSport && selectedSport.id !== 'all' && (
-              <View style={styles.filterChip}>
-                <Text style={styles.filterChipText}>
-                  {getSportIcon(selectedSport.sports_name || selectedSport.name, selectedSport.sport_id)} {getCurrentSportName()}
-                </Text>
-              </View>
-            )}
-          </View>
-        )}
-
-        {/* Tournament Cards */}
-        <View style={styles.tournamentsList}>
-          {renderTournamentCards()}
-        </View>
-
-        {/* Bottom Spacing */}
-        <View style={styles.bottomSpacing} />
-      </ScrollView>
-    </SafeAreaView>
+      />
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F9FAFB',
-  },
-  header: {
-    paddingTop: 35,
-    backgroundColor: '#FFFFFF',
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
+    backgroundColor: '#f5f5f5',
+    paddingTop: 16,
   },
   headerTitle: {
     fontSize: 24,
     fontWeight: '700',
-    color: '#111827',
-    marginBottom: 4,
+    color: '#333',
+    textAlign: 'center',
+    marginVertical: 12,
   },
-  headerSubtitle: {
-    fontSize: 14,
-    color: '#6B7280',
-    fontWeight: '500',
+  flatListContent: {
+    paddingBottom: 20,
   },
-  scrollView: {
-    flex: 1,
-  },
-  filtersContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginHorizontal: 16,
-    marginTop: 8,
-    marginBottom: 8,
-  },
-  filterChip: {
-    backgroundColor: '#FFFFFF',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 20,
-    marginRight: 8,
-    marginBottom: 8,
-    borderWidth: 1,
-    borderColor: '#E17827',
-  },
-  filterChipText: {
-    fontSize: 12,
-    color: '#E17827',
-    fontWeight: '500',
-  },
-  tournamentsList: {
-    paddingTop: 0,
-  },
-  loadingContainer: {
+  noDataContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: 60,
+    padding: 16,
+    minHeight: 200, // Ensure some height for empty state
   },
-  loadingText: {
-    marginTop: 16,
+  noDataText: {
     fontSize: 16,
-    color: '#6B7280',
-    fontWeight: '500',
-  },
-  errorContainer: {
-    backgroundColor: '#FEE2E2',
-    marginHorizontal: 16,
-    marginVertical: 16,
-    paddingVertical: 20,
-    paddingHorizontal: 16,
-    borderRadius: 12,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#FECACA',
+    color: '#666',
+    textAlign: 'center',
   },
   errorText: {
     fontSize: 16,
-    color: '#DC2626',
-    fontWeight: '600',
-    textAlign: 'center',
-    marginBottom: 4,
-  },
-  retryText: {
-    fontSize: 14,
-    color: '#7F1D1D',
+    color: '#d32f2f',
     textAlign: 'center',
   },
-  noDataContainer: {
-    alignItems: 'center',
-    paddingVertical: 40,
-    paddingHorizontal: 20,
+  loading: {
+    flex: 1,
+    justifyContent: 'center',
   },
-  noDataText: {
-    fontSize: 18,
-    color: '#374151',
-    fontWeight: '600',
-    textAlign: 'center',
-    marginBottom: 8,
-  },
-  noDataSubtext: {
-    fontSize: 14,
-    color: '#6B7280',
-    textAlign: 'center',
-    lineHeight: 20,
-  },
-  bottomSpacing: {
-    height: 20,
+  footerSpacer: {
+    height: 20, // Add some space at the bottom
   },
 });
 

@@ -11,7 +11,7 @@ import Icon from 'react-native-vector-icons/MaterialIcons';
 
 const MatchCard = ({ match, sportName, sportsId }) => {
   const statusStyle = getMatchStatusStyle(match.status);
-  const matchDateTime = formatDateToIST(match.start_time, 'datetime');
+  const matchDateTime = formatDateToIST(match.start_time || match.start_date, 'datetime');
 
   // Function to get sport icon based on sport name or ID
   const getSportIcon = (sportName, sportId) => {
@@ -23,11 +23,13 @@ const MatchCard = ({ match, sportName, sportsId }) => {
       'american football': '🏈',
       'archery': '🏹',
       'badminton': '🏸',
+      'basketball': '🏀',
       'chess': '♟️',
       'cricket': '🏏',
       'hockey': '🏒',
       'kabaddi': '🤼‍♂️',
       'pickleball': '🏓', // Using table tennis emoji as closest match
+      'tennis': '🎾',
     };
 
     return sportIcons[sport] || '⚽'; // Default to football if sport not found
@@ -36,6 +38,7 @@ const MatchCard = ({ match, sportName, sportsId }) => {
   // Helper function to get sport name by ID
   const getSportNameById = (sportId) => {
     const sportMap = {
+      // Legacy mappings (keeping for backward compatibility)
       7011305: 'american football',
       7011803: 'archery',
       7020104: 'badminton',
@@ -45,19 +48,29 @@ const MatchCard = ({ match, sportName, sportsId }) => {
       7081503: 'hockey',
       7110101: 'kabaddi',
       7161103: 'pickleball',
+      // New API mappings
+      7020111: 'basketball',
+      7200514: 'tennis',
     };
     
     return sportMap[sportId];
   };
 
   const renderTeamLogo = (teamName, logoUrl, defaultImage) => {
-    // Always use the provided default images
+    // Check if API provides team logo URL and it's valid
+    const hasValidLogo = logoUrl && logoUrl.trim() !== '';
+    
     return (
       <View style={styles.teamLogoContainer}>
         <Image
-          source={defaultImage}
+          source={hasValidLogo ? { uri: logoUrl } : defaultImage}
           style={styles.teamLogoImage}
           resizeMode="contain"
+          // Add error handling for network images
+          onError={() => {
+            // If network image fails to load, fallback is handled by the source prop logic
+            console.log('Failed to load team logo:', logoUrl);
+          }}
         />
       </View>
     );
@@ -68,7 +81,11 @@ const MatchCard = ({ match, sportName, sportsId }) => {
       <View style={styles.teamsContainer}>
         {/* Team A */}
         <View style={styles.teamSide}>
-          {renderTeamLogo(match.team_a, match.team_a_logo, require('../assets/tournamentlogo1.png'))}
+          {renderTeamLogo(
+            match.team_a, 
+            match.team_a_logo, 
+            require('../assets/tournamentlogo1.png')
+          )}
         </View>
 
         {/* VS Separator */}
@@ -78,7 +95,11 @@ const MatchCard = ({ match, sportName, sportsId }) => {
 
         {/* Team B */}
         <View style={styles.teamSide}>
-          {renderTeamLogo(match.team_b, match.team_b_logo, require('../assets/tournamentlogo2.png'))}
+          {renderTeamLogo(
+            match.team_b, 
+            match.team_b_logo, 
+            require('../assets/tournamentlogo2.png')
+          )}
         </View>
       </View>
     );
@@ -106,7 +127,7 @@ const MatchCard = ({ match, sportName, sportsId }) => {
         
         <View style={styles.statusBadge}>
           <Text style={styles.statusText}>
-            {match.stage || 'Quarter Final'}
+            {match.stage || 'No Stage Provided'}
           </Text>
         </View>
       </View>
@@ -121,7 +142,11 @@ const MatchCard = ({ match, sportName, sportsId }) => {
         <View style={styles.detailRow}>
           {/* Left-aligned Date */}
           <View style={styles.detailItem}>
-            <Icon name="event" size={16} color="#000000" style={styles.detailIcon} />
+            <Image 
+              source={require('../assets/calendar-outline.png')} 
+              style={[styles.detailIcon, { width: 16, height: 16 }]} 
+              resizeMode="contain"
+            />
             <Text style={styles.detailText}>
               {matchDateTime.date}
             </Text>
@@ -136,11 +161,14 @@ const MatchCard = ({ match, sportName, sportsId }) => {
           </View>
         </View>
 
-
         {/* Bottom Row - Location */}
         <View style={styles.detailRow}>
           <View style={styles.detailItem}>
-            <Icon name="location-on" size={16} color="#000000" style={styles.detailIcon} />
+            <Image 
+              source={require('../assets/location-outline.png')} 
+              style={[styles.detailIcon, { width: 16, height: 16 }]} 
+              resizeMode="contain"
+            />
             <Text style={styles.detailText} numberOfLines={1}>
               {match.venue || 'Saket Sports Club'}
             </Text>

@@ -1,5 +1,4 @@
-// src/components/CalendarView.js
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -11,9 +10,38 @@ import { formatCalendarDate, getMonthName, getISTDateKey, getTodayDateString } f
 
 const { width: screenWidth } = Dimensions.get('window');
 
-const CalendarView = ({ markedDates = {}, onDateSelect, selectedDate }) => {
-  const [currentMonth, setCurrentMonth] = useState(8); // August 2025
+const CalendarView = ({ markedDates = {}, onDateSelect, selectedDate, onMonthChange, currentMonth: propCurrentMonth }) => {
+  const [currentMonth, setCurrentMonth] = useState(propCurrentMonth || 8); // August 2025
   const [currentYear] = useState(2025);
+
+  // Sync with parent component's current month
+  useEffect(() => {
+    if (propCurrentMonth && propCurrentMonth !== currentMonth) {
+      setCurrentMonth(propCurrentMonth);
+    }
+  }, [propCurrentMonth]);
+
+  // Debug logging to check markedDates
+  useEffect(() => {
+    console.log('=== CalendarView Debug ===');
+    console.log('markedDates:', markedDates);
+    console.log('selectedDate:', selectedDate);
+    console.log('Number of marked dates:', Object.keys(markedDates).length);
+    console.log('Sample marked dates keys:', Object.keys(markedDates).slice(0, 5));
+    console.log('========================');
+  }, [markedDates, selectedDate]);
+
+  // Helper function to create date string in YYYY-MM-DD format
+  const createDateString = (year, month, day) => {
+    return `${year}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
+  };
+
+  // Check if a date belongs to the current month being displayed
+  const isDateInCurrentMonth = (dateString, month, year) => {
+    if (!dateString) return false;
+    const [dateYear, dateMonth] = dateString.split('-').map(Number);
+    return dateYear === year && dateMonth === month;
+  };
 
   // Generate calendar data
   const generateCalendarData = (month, year) => {
@@ -22,20 +50,18 @@ const CalendarView = ({ markedDates = {}, onDateSelect, selectedDate }) => {
     const daysInMonth = lastDay.getDate();
     const startingDayOfWeek = firstDay.getDay(); // 0 = Sunday
 
-    // Convert Sunday (0) to Monday (0) based system
     const mondayBasedStart = startingDayOfWeek === 0 ? 6 : startingDayOfWeek - 1;
 
     const calendarDays = [];
 
-    // Get previous month's last days
     const prevMonth = month === 1 ? 12 : month - 1;
     const prevYear = month === 1 ? year - 1 : year;
     const prevMonthLastDay = new Date(prevYear, prevMonth, 0).getDate();
 
-    // Add previous month's days
+    // Add previous month's last days
     for (let i = mondayBasedStart - 1; i >= 0; i--) {
       const day = prevMonthLastDay - i;
-      const dateString = getISTDateKey(`${prevYear}-${prevMonth}-${day}T00:00:00Z`);
+      const dateString = createDateString(prevYear, prevMonth, day);
       calendarDays.push({
         day,
         dateString,
@@ -48,19 +74,28 @@ const CalendarView = ({ markedDates = {}, onDateSelect, selectedDate }) => {
 
     // Add days of current month
     for (let day = 1; day <= daysInMonth; day++) {
-      const dateString = getISTDateKey(`${year}-${month}-${day}T00:00:00Z`);
+      const dateString = createDateString(year, month, day);
+      const todayString = getTodayDateString();
+      const isMarked = !!markedDates[dateString];
+      
+      // Only show as selected if the selected date belongs to the current month
+      const isSelected = selectedDate === dateString && isDateInCurrentMonth(selectedDate, month, year);
+
+      console.log(`📅 Checking date ${dateString}: marked=${isMarked}, selected=${isSelected}, today=${dateString === todayString}`);
+      console.log(`   selectedDateProp=${selectedDate}, markedDates has this key: ${!!markedDates[dateString]}`);
+
       calendarDays.push({
         day,
         dateString,
-        isMarked: !!markedDates[dateString],
-        isSelected: selectedDate === dateString,
-        isToday: dateString === getTodayDateString(),
+        isMarked,
+        isSelected,
+        isToday: dateString === todayString,
         isPreviousMonth: false,
         isNextMonth: false,
       });
     }
 
-    // Fill remaining cells with next month's days (only if needed to complete the last row)
+    // Fill remaining cells with next month's days
     const totalDaysShown = calendarDays.length;
     const remainingCellsInLastRow = totalDaysShown % 7;
     const nextMonthDaysToShow = remainingCellsInLastRow === 0 ? 0 : 7 - remainingCellsInLastRow;
@@ -70,7 +105,7 @@ const CalendarView = ({ markedDates = {}, onDateSelect, selectedDate }) => {
       const nextYear = month === 12 ? year + 1 : year;
 
       for (let day = 1; day <= nextMonthDaysToShow; day++) {
-        const dateString = getISTDateKey(`${nextYear}-${nextMonth}-${day}T00:00:00Z`);
+        const dateString = createDateString(nextYear, nextMonth, day);
         calendarDays.push({
           day,
           dateString,
@@ -86,19 +121,44 @@ const CalendarView = ({ markedDates = {}, onDateSelect, selectedDate }) => {
   };
 
   const handlePrevMonth = () => {
-    if (currentMonth > 8) { // Don't go before August
-      setCurrentMonth(currentMonth - 1);
+    if (currentMonth > 8) {
+      const newMonth = currentMonth - 1;
+      setCurrentMonth(newMonth);
+      // Notify parent component about month change
+      if (onMonthChange) {
+        onMonthChange(newMonth);
+      }
+      // Clear selection when changing months
+      clearSelectionIfNotInMonth(newMonth, currentYear);
     }
   };
 
   const handleNextMonth = () => {
-    if (currentMonth < 10) { // Don't go after October
-      setCurrentMonth(currentMonth + 1);
+    if (currentMonth < 11) { // Allow November
+      const newMonth = currentMonth + 1;
+      setCurrentMonth(newMonth);
+      // Notify parent component about month change
+      if (onMonthChange) {
+        onMonthChange(newMonth);
+      }
+      // Clear selection when changing months
+      clearSelectionIfNotInMonth(newMonth, currentYear);
+    }
+  };
+
+  // Clear the selection if the selected date doesn't belong to the new month
+  const clearSelectionIfNotInMonth = (newMonth, newYear) => {
+    if (selectedDate && !isDateInCurrentMonth(selectedDate, newMonth, newYear)) {
+      console.log(`Clearing selection - date ${selectedDate} not in month ${newMonth}`);
+      if (onDateSelect) {
+        onDateSelect(null); // Clear the selection
+      }
     }
   };
 
   const handleDatePress = (dateItem) => {
     if (dateItem && onDateSelect) {
+      console.log('Date pressed:', dateItem.dateString);
       onDateSelect(dateItem.dateString);
     }
   };
@@ -143,7 +203,6 @@ const CalendarView = ({ markedDates = {}, onDateSelect, selectedDate }) => {
 
   return (
     <View style={styles.container}>
-      {/* Calendar Header */}
       <View style={styles.header}>
         <TouchableOpacity
           onPress={handlePrevMonth}
@@ -172,30 +231,28 @@ const CalendarView = ({ markedDates = {}, onDateSelect, selectedDate }) => {
           onPress={handleNextMonth}
           style={[
             styles.navigationButton,
-            currentMonth >= 10 && styles.disabledButton
+            currentMonth >= 11 && styles.disabledButton
           ]}
-          disabled={currentMonth >= 10}
+          disabled={currentMonth >= 11}
           activeOpacity={0.7}
         >
           <Text style={[
             styles.navigationText,
-            currentMonth >= 10 && styles.disabledText
+            currentMonth >= 11 && styles.disabledText
           ]}>
             ›
           </Text>
         </TouchableOpacity>
       </View>
 
-      {/* Days of Week Header */}
       <View style={styles.daysOfWeekContainer}>
-        {['m', 't', 'w', 't', 'f', 's', 's'].map((day, index) => (
+        {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((day, index) => (
           <View key={index} style={styles.dayOfWeekContainer}>
             <Text style={styles.dayOfWeekText}>{day}</Text>
           </View>
         ))}
       </View>
 
-      {/* Calendar Grid */}
       <View style={styles.calendarGrid}>
         {calendarData.map((dateItem, index) => renderCalendarDay(dateItem, index))}
       </View>
@@ -298,8 +355,8 @@ const styles = StyleSheet.create({
     fontWeight: '400',
   },
   markedDayText: {
-    fontWeight: '700',
-    color: '#000000',
+    fontWeight: '900',
+    color: '#0374151',
   },
   selectedDay: {
     backgroundColor: '#E17827',
@@ -307,7 +364,7 @@ const styles = StyleSheet.create({
   },
   selectedDayText: {
     color: '#FFFFFF',
-    fontWeight: '500',
+    fontWeight: '700',
   },
   selectedMarkedDayText: {
     color: '#FFFFFF',

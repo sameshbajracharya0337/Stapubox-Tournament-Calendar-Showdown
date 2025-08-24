@@ -23,7 +23,8 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 const TournamentCard = ({ tournament, sportName, sportsId }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const [rotateAnimation] = useState(new Animated.Value(0));
-  const [logoError, setLogoError] = useState(false);
+  const [tournamentLogoError, setTournamentLogoError] = useState(false);
+  const [googleDriveLogoError, setGoogleDriveLogoError] = useState(false);
   const [isFavorite, setIsFavorite] = useState(false);
 
   const hasMatches = tournament.matches && tournament.matches.length > 0;
@@ -50,15 +51,28 @@ const TournamentCard = ({ tournament, sportName, sportsId }) => {
   });
 
   const renderTournamentLogo = () => {
-    const googleDriveUrl =
-      'https://drive.google.com/uc?export=view&id=1Dn2LpQowS_qKCtrvYDeOXnpI2ne6wSdo';
+    const tournamentImageUrl = tournament.tournament_img_url;
+    const googleDriveUrl = 'https://drive.google.com/uc?export=view&id=1Dn2LpQowS_qKCtrvYDeOXnpI2ne6wSdo';
+    const fallbackImage = require('../assets/tournament_logo.png');
+
+    // Debug logging
+    console.log(`🖼️ Tournament: ${tournament.name}`);
+    console.log(`📸 Tournament Image URL: ${tournamentImageUrl}`);
+    console.log(`❌ Tournament Logo Error: ${tournamentLogoError}`);
+    console.log(`❌ Google Drive Error: ${googleDriveLogoError}`);
 
     let logoSource;
 
-    if (!logoError) {
+    // Priority: 1. Tournament image URL, 2. Google Drive URL, 3. Local fallback
+    if (tournamentImageUrl && !tournamentLogoError) {
+      logoSource = { uri: tournamentImageUrl };
+      console.log(`✅ Using tournament image: ${tournamentImageUrl}`);
+    } else if (!googleDriveLogoError) {
       logoSource = { uri: googleDriveUrl };
+      console.log(`🔄 Using Google Drive fallback: ${googleDriveUrl}`);
     } else {
-      logoSource = require('../assets/tournament_logo.png');
+      logoSource = fallbackImage;
+      console.log(`📱 Using local fallback image`);
     }
 
     return (
@@ -66,10 +80,25 @@ const TournamentCard = ({ tournament, sportName, sportsId }) => {
         source={logoSource}
         style={styles.tournamentLogo}
         resizeMode="contain"
-        defaultSource={require('../assets/tournament_logo.png')}
+        defaultSource={fallbackImage}
         onError={() => {
-          console.warn('Google Drive logo failed, using fallback.');
-          setLogoError(true);
+          if (tournamentImageUrl && !tournamentLogoError) {
+            console.warn('🚫 Tournament image failed, trying Google Drive fallback:', tournamentImageUrl);
+            setTournamentLogoError(true);
+          } else if (!googleDriveLogoError) {
+            console.warn('🚫 Google Drive logo failed, using local fallback.');
+            setGoogleDriveLogoError(true);
+          }
+        }}
+        onLoad={() => {
+          // Reset error states on successful load
+          if (logoSource.uri === tournamentImageUrl) {
+            console.log('✅ Tournament image loaded successfully:', tournamentImageUrl);
+          } else if (logoSource.uri === googleDriveUrl) {
+            console.log('✅ Google Drive image loaded successfully');
+          } else {
+            console.log('✅ Local fallback image loaded successfully');
+          }
         }}
       />
     );
@@ -78,9 +107,9 @@ const TournamentCard = ({ tournament, sportName, sportsId }) => {
   const getLevelColor = (level) => {
     switch (level?.toLowerCase()) {
       case 'international':
-        return '#FF6B35';
+        return '#00B0F0';
       case 'national':
-        return '#10B981';
+        return '#00B0F0';
       case 'domestic':
         return '#00B0F0';
       default:
@@ -166,14 +195,14 @@ const TournamentCard = ({ tournament, sportName, sportsId }) => {
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: '#F9FAFB', // Same as screen background
+    backgroundColor: '#f5f5f5', // Changed to match main screen
     borderBottomWidth: 1,
     borderBottomColor: '#E5E7EB', // Light gray separator line
   },
   tournamentCard: {
     paddingHorizontal: 16,
     paddingVertical: 16,
-    backgroundColor: '#F9FAFB', // Same as screen background
+    backgroundColor: '#f5f5f5', // Changed to match main screen
   },
   tournamentHeader: { 
     flexDirection: 'row', 
@@ -243,12 +272,12 @@ const styles = StyleSheet.create({
     padding: 2 
   },
   matchesContainer: {
-    backgroundColor: '#F9FAFB',
+    backgroundColor: '#f5f5f5', // Changed to match main screen
     paddingHorizontal: 16,
     paddingVertical: 8,
   },
   noMatchesContainer: { 
-    backgroundColor: '#F9FAFB', 
+    backgroundColor: '#f5f5f5', // Changed to match main screen
     padding: 20, 
     alignItems: 'center' 
   },
